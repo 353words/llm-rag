@@ -1,7 +1,7 @@
 default:
 	$(error pick a target)
 
-DB = vulns.db
+DB = vulns.ddb
 
 db:
 	rm -f $(DB)

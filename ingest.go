@@ -7,14 +7,11 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/ollama/ollama/api"
-
-	"rag/embed"
 )
 
 type Vuln struct {
@@ -60,7 +57,14 @@ var (
 	insertSQL string
 )
 
-func ingest(r *zip.ReadCloser, c *api.Client, db *sql.DB) (int, error) {
+func ingest(c *api.Client, db *sql.DB) error {
+	// https://vuln.go.dev/vulndb.zip
+	r, err := zip.OpenReader("vulndb.zip")
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
 	ctx := context.TODO()
 	count := 0
 	total := len(r.File)
@@ -74,57 +78,26 @@ func ingest(r *zip.ReadCloser, c *api.Client, db *sql.DB) (int, error) {
 		count++
 		rc, err := f.Open()
 		if err != nil {
-			return 0, err
+			return err
 		}
 
 		dec := json.NewDecoder(rc)
 		var v Vuln
 
 		if err := dec.Decode(&v); err != nil {
-			return 0, err
+			return err
 		}
 
 		content := v.String()
-		em, err := embed.Embed(ctx, c, content)
+		em, err := Embed(ctx, c, content)
 		if err != nil {
-			return 0, err
+			return err
 		}
 
 		if _, err := db.ExecContext(ctx, insertSQL, v.ID, content, em); err != nil {
-			return 0, err
+			return err
 		}
 	}
 
-	return count, nil
-}
-
-func main() {
-	c, err := api.ClientFromEnvironment()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
-		os.Exit(1)
-	}
-
-	// https://vuln.go.dev/vulndb.zip
-	db, err := sql.Open("duckdb", "vulns.db")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
-		os.Exit(1)
-	}
-	defer db.Close()
-
-	r, err := zip.OpenReader("vulndb.zip")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
-		os.Exit(1)
-	}
-	defer r.Close()
-
-	count, err := ingest(r, c, db)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("ingested %d documents\n", count)
+	return nil
 }
