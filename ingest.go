@@ -52,12 +52,10 @@ func (v Vuln) String() string {
 	return buf.String()
 }
 
-var (
-	//go:embed sql/insert.sql
-	insertSQL string
-)
+//go:embed sql/insert.sql
+var insertSQL string
 
-func ingest(c *api.Client, db *sql.DB) error {
+func ingest(ctx context.Context, c *api.Client, db *sql.DB) error {
 	// https://vuln.go.dev/vulndb.zip
 	r, err := zip.OpenReader("vulndb.zip")
 	if err != nil {
@@ -65,7 +63,6 @@ func ingest(c *api.Client, db *sql.DB) error {
 	}
 	defer r.Close()
 
-	ctx := context.TODO()
 	count := 0
 	total := len(r.File)
 

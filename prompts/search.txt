@@ -1,0 +1,3 @@
+You are an expert cybersecurity researcher. 
+Based on the following user query and CVE examples as reference, suggest 3 new and different CSVe.
+Provide only the possible CVEs, don't ask questions.

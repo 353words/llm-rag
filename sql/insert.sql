@@ -1,9 +1,9 @@
 INSERT INTO vulns (
-	id,
-	content,
-	embedding
+    id,
+    content,
+    embedding
 ) VALUES (
-	?,
-	?,
-	?::FLOAT[1024]
+    ?,
+    ?,
+    ?::FLOAT[1024]
 );
