@@ -115,7 +115,7 @@ func ingest(ctx context.Context, db *sql.DB) error {
 		count++
 		v, err := decodeEntry(f)
 		if err != nil {
-			slog.Error("decode", "error", err)
+			slog.Error("decode", "name", f.Name, "error", err)
 			return err
 		}
 

@@ -1,6 +1,6 @@
-## RAG : A Vulnerability Research Tool
+## RAG in Go: A Vulnerability Research Tool
 ++
-title = "RAG : A Vulnerability Research Tool"
+title = "RAG in Go: A Vulnerability Research Tool"
 date = "FIXME"
 tags = ["golang"]
 categories = ["golang", "llm", "ai", "rag"]
@@ -76,14 +76,15 @@ Let's jump to the code and see how it's done.
 Listing 1 shows the LLM utility functions.
 On lines 12-17 `init` sets the URL for the [kronk][kronk] API.
 `NewLLM` on lines 20-26 return a new OpenAI compatible connection to kronk. Since OpenAI API requires an API key we provide a mock one on line 23.
-`NewEmbedder` on lines 29-40 return an LLM that can embed documents. We're using the small `Qwen3-Embedding-0` mode for that.
+`NewEmbedder` on lines 29-40 return an LLM that can embed documents. We're using the small `Qwen3-Embedding-0.6B-Q8_0` mode for that.
 
 
 ### Ingestion
 
 In this step we read the data from the zip file, parse the JSON document and then create a vector embedding to insert into the database. Apart from the embedding vector, we store the CVE in text format as well as the ID. 
 
-_Note: Knowing your own data and what people are going to query, you need to design the database schema. For example, if you have multi-tenant database, you can add a `user` column to make sure you query only document that the current user is allowed to read._
+_Note: Knowing your own data and what people are going to query, you need to design the database schema. 
+For example, if you have multi-tenant database, you can add a `user` column to make sure you query only document that the current user is allowed to read._
 
 For this blog post I'll use [DuckDB](https://duckdb.org/) for its built-in vector support and a simple schema:
 
@@ -151,10 +152,13 @@ Listing 2 shows the database schema. You use the `embedding` column to find out 
 Listing 3 shows the `Vuln` struct and its methods.
 The `Vuln` struct on lines 17-24 matches the JSON document in the vulnerability zip file.
 The `Package` method on lines 26-41 searches for the affected package using an anonymous struct trick to unmarshal only what we need from the complex JSON schema.
-The `Content` method on lines 43-57 returns a string representation of the vulnerability. If `full` is `true` it include more fields—this is what's stored in the database for the LLM to read. For embedding (when `full` is `false`), we only use the `Summary`, `Details`, and `Package` fields to avoid adding "noise" like IDs and timestamps to the vector.
+The `Content` method on lines 43-57 returns a string representation of the vulnerability. 
+For embedding, use `full=false` so that only `Summary`, `Details` and `Package` are included to avoid noise. 
+For storage, use `full=true` that will get to the LLM context.
 
 
-**Listing 4: decodeEntry`
+
+**Listing 4: decodeEntry
 
 ```go
 059 func decodeEntry(zf *zip.File) (Vuln, error) {
@@ -226,7 +230,7 @@ On line 66 you create a new JSON decoder and on lines 69-73 decode JSON and retu
 115         count++
 116         v, err := decodeEntry(f)
 117         if err != nil {
-118             slog.Error("decode", "error", err)
+118             slog.Error("decode", "name", f.Name, "error", err)
 119             return err
 120         }
 121 
@@ -257,7 +261,7 @@ On lines 96-99 you create an embedder.
 On lines 101-105 you create a new transaction. Working inside a transaction guarantees that either all the documents go into the database or none; it's a very good thing to have in data pipelines.
 On line 107 you initialize some counters.
 On line 109 you start looping on the zip file entries.
-On line 110 you print the progress, the `\r` at the end means the same line is updated (vs a new line).
+On line 110 you print the progress.
 On lines 115-122 you decode the entry.
 On lines 124-129 you use the LLM to create embedding for the documents.
 On lines 131-134 you insert the embedding and the document to the database.
@@ -342,7 +346,7 @@ In the search part, you'll get a query from the user. First, you'll query the da
 Listing 7 shows `queryDB` which is the first part.
 On line 15 you use `embed` to get the search SQL query.
 On lines 18-21 you create a new embedder and on lines 23-27 you use it to embed the user query.
-On lines 28 you query the database using the query embedding vector.
+On lines 28 you query the database using the embedding vector.
 On lines 40-50 you iterate over the results, scanning the returned row to content and similarity and filtering out results with similarity less than 0.5. Note that similarity thresholds are highly dependent on the embedding model used.
 Finally on line 56 you return the results.
 
@@ -360,7 +364,7 @@ Finally on line 56 you return the results.
 
 Listing 8 shows the search SQL.
 On line 3 you use [cosine similarity][cosine] to measure the similarity between the user query and database document.
-On line 5 your order by the similarity and one line 6 you limit the number of returned documents.
+On line 5 your order by the similarity and on line 6 you limit the number of returned documents.
 
 ### Main
 
@@ -369,7 +373,10 @@ In `main.go` we tie everything up.
 **Listing 9: main.go**
 
 ```go
-
+013 var options struct {
+014     ingest bool
+015 }
+016 
 017 func main() {
 018     flag.BoolVar(&options.ingest, "ingest", false, "populate database from vulndb.zip")
 019     flag.Usage = func() {
@@ -417,7 +424,7 @@ In `main.go` we tie everything up.
 ```
 
 Listing 9 shows main.go.
-On lines 18-23 you set the command line flags and parse them.
+On lines 13-23 you set the command line flags and parse them.
 On lines 25-31 you set the log level to `DEBUG` if the `DEBUG` environment variable is set.
 Since both ingest and search need a database connection, you create one on lines 33-38.
 On line 40 you set the context to `context.TODO` signaling you're not sure yet about the timeout to use.
@@ -456,7 +463,7 @@ But, this adds another step to the search phase, which uses more tokens (money) 
 
 As an exercise, you can [grab the code][code] and implement both chunking and query enhancement ☺
 
-What interesting uses did you find for RAGs? Drop me a line at miki@ardanlabs.com
+What interesting uses did you find for RAG based systems? Drop me a line at miki@ardanlabs.com
 
 
 [chunking]: https://www.datacamp.com/blog/chunking-strategies
