@@ -362,7 +362,105 @@ Listing 8 shows the search SQL.
 On line 3 you use [cosine similarity][cosine] to measure the similarity between the user query and database document.
 On line 5 your order by the similarity and one line 6 you limit the number of returned documents.
 
+### Main
 
+In `main.go` we tie everything up.
+
+**Listing 9: main.go**
+
+```go
+
+017 func main() {
+018     flag.BoolVar(&options.ingest, "ingest", false, "populate database from vulndb.zip")
+019     flag.Usage = func() {
+020         fmt.Fprintf(os.Stderr, "usage: %s [options] QUERY\n", path.Base(os.Args[0]))
+021         flag.PrintDefaults()
+022     }
+023     flag.Parse()
+024 
+025     if os.Getenv("DEBUG") != "" {
+026         h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+027             Level: slog.LevelDebug,
+028         })
+029         log := slog.New(h)
+030         slog.SetDefault(log)
+031     }
+032 
+033     db, err := sql.Open("duckdb", "vulns.ddb")
+034     if err != nil {
+035         fmt.Fprintf(os.Stderr, "error: %s\n", err)
+036         os.Exit(1)
+037     }
+038     defer db.Close()
+039 
+040     ctx := context.TODO()
+041 
+042     if options.ingest {
+043         if err := ingest(ctx, db); err != nil {
+044             fmt.Fprintf(os.Stderr, "error: %s\n", err)
+045             os.Exit(1)
+046         }
+047         return
+048     }
+049 
+050     if flag.NArg() != 1 {
+051         fmt.Fprintln(os.Stderr, "error: wrong number of arguments")
+052         os.Exit(1)
+053     }
+054 
+055     query := flag.Arg(0)
+056     if err := search(ctx, db, query); err != nil {
+057         fmt.Fprintf(os.Stderr, "error: %s\n", err)
+058         os.Exit(1)
+059     }
+060 }
+```
+
+Listing 9 shows main.go.
+On lines 13-23 you set the command line flags and parse them.
+On lines 25-31 you set the log level to `DEBUG` if the `DEBUG` environment variable is set.
+Since both ingest and search need a database connection, you create one on lines 33-38.
+On line 40 you set the context to `context.TODO` signaling you're not sure yet about the timeout to use.
+On line 42 you check if you `options.ingest` flag is set and if so you run ingestion on lines 43-47.
+On lines 50-55 you get the user query from the command line and on lines 56-59 you call the search.
+
+You can run a search example using `make search`:
+
+```
+$ make search
+go run . 'what are three most common causes of errors in HTTP?'
+
+
+Three most common causes of HTTP errors in the provided context:
+1. **Resource exhaustion** due to improper handling of large JSON responses (e.g., in `github.com/cloudflare/cfrpki`).
+2. **Denial of service (DoS)** via malicious chunk extensions in HTTP handlers (e.g., `net/http`).
+3. **Improper access control** in CORS handling that bypasses the Same Origin Policy.
+```
+
+### Conclusion and Further Steps
+
+In about 350 lines of Go code, we created a system that ingests data and search in it using embeddings and LLM.
+Using RAG allows LLM to work with data that was not available to them when they were trained. 
+The most common use case is data that's internal to the company.
+
+In real scenarios you'll run ingestion on a schedule or when someone adds a new document.
+
+One main area for improvement in the ingestion process is chunking.
+Say you embed a whole book, if you add it as context to your query you'll fill up the context and will get bad results (if any).
+You need to split long documents to meaningful chunks, where "meaningful" differs for the type of document.
+For example, you'll split source code by functions, markdown files by headings and [more][chunking].
+
+Another place where you can improve the code is enhancing the user query.
+Most users write short queries, and you can ask an LLM to enhance the user query with more words to get better matches.
+But, this adds another step to the search phase, which uses more tokens (money) and takes more time.
+
+As an exercise, you can [grab the code][code] and implement both chunking and query enhancement ☺
+
+What interesting uses did you find for RAGs? Drop me a line at miki@ardanlabs.com
+
+
+[chunking]: https://www.datacamp.com/blog/chunking-strategies
+[code]: https://github.com/353words/llm-rag
 [cosine]: https://en.wikipedia.org/wiki/Cosine_similarity
 [embedding]: https://en.wikipedia.org/wiki/Embedding_(machine_learning)
 [kron]: https://www.kronkai.com/
