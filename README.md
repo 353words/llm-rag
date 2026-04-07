@@ -11,7 +11,7 @@ author = "mikit"
 ### Introduction
 
 In [the previous post][tools], you saw how you can use tools to add information to an LLM query.
-In this post, we'll see another method of adding information to an LLM called [RAG][rag], or Retrieval-Augmented Generation.
+In this post, we'll see another method of adding information to an LLM called [RAG][rag], or Retrieval-Augmented Generation. 
 
 The idea of RAG is that you want the LLM to have access to information that wasn't available to it when it was initially trained.
 You do it by storing documents in your own database along with their [embedding][embedding].
@@ -85,7 +85,7 @@ In this step we read the data from the zip file, parse the JSON document and the
 
 _Note: Knowing your own data and what people are going to query, you need to design the database schema. For example, if you have multi-tenant database, you can add a `user` column to make sure you query only document that the current user is allowed to read._
 
-For this blog post I'll use a simple schema:
+For this blog post I'll use [DuckDB](https://duckdb.org/) for its built-in vector support and a simple schema:
 
 
 **Listing 2: Database Schema**
@@ -148,10 +148,10 @@ Listing 2 shows the database schema. You use the `embedding` column to find out 
 057 }
 ```
 
-Listing 3 shows the `ingest` function.
+Listing 3 shows the `Vuln` struct and its methods.
 The `Vuln` struct on lines 17-24 matches the JSON document in the vulnerability zip file.
-The `Package` method on lines 26-41 searches for the affected package in the JSON document and return it.
-The `Content` method on lines 43-57 returns a string representation of the vulnerability. If `full` is `true` it include more fields - that what's stored in the database. But, for embedding you only use the `Summary`, `Details` and `Package` fields.
+The `Package` method on lines 26-41 searches for the affected package using an anonymous struct trick to unmarshal only what we need from the complex JSON schema.
+The `Content` method on lines 43-57 returns a string representation of the vulnerability. If `full` is `true` it include more fields—this is what's stored in the database for the LLM to read. For embedding (when `full` is `false`), we only use the `Summary`, `Details`, and `Package` fields to avoid adding "noise" like IDs and timestamps to the vector.
 
 
 **Listing 4: decodeEntry`
@@ -249,12 +249,12 @@ On line 66 you create a new JSON decoder and on lines 69-73 decode JSON and retu
 138 }
 ```
 
-Listing 5 shows the `ingest` function.
+Listing 5 shows the core logic of the `ingest` function.
 On lines 76-82 you use the `embed` package to get the SQL for the schema and insertion.
 On lines 86-90 you open the zip file.
-On lines 92-94 you make sure the table exits in the database. In real world scenarios, the operations team creates the database and the table.
+On lines 92-94 you make sure the table exists in the database. In real world scenarios, the operations team creates the database and the table.
 On lines 96-99 you create an embedder.
-On lines 101-105 you create a new transactions. Working inside a transaction guarantee that either all the documents go into the database or none, it's a very good thing to have in data pipelines.
+On lines 101-105 you create a new transaction. Working inside a transaction guarantees that either all the documents go into the database or none; it's a very good thing to have in data pipelines.
 On line 107 you initialize some counters.
 On line 109 you start looping on the zip file entries.
 On line 110 you print the progress, the `\r` at the end means the same line is updated (vs a new line).
@@ -264,7 +264,7 @@ On lines 131-134 you insert the embedding and the document to the database.
 Finally on line 137 you commit the transaction.
 
 Some design decisions:
-- An error does not halts the process on increases the number of errors.
+- An individual document error does not halt the process but increases the number of errors. We prioritize completing the batch over perfect success.
 - You embed and insert documents one-by-one. Both embedding and SQL have options to do batch processing that will speed up the process.
 
 **Listing 6: sql/insert.sql**
@@ -343,7 +343,7 @@ Listing 7 shows `queryDB` which is the first part.
 On line 15 you use `embed` to get the search SQL query.
 On lines 18-21 you create a new embedder and on lines 23-27 you use it to embed the user query.
 On lines 28 you query the database using the query embedding vector.
-On lines 40-50 you iterate over the results, scanning the returned row to content and similarity and filtering out results with similarity less than 0.5 (similarity range is 0-1).
+On lines 40-50 you iterate over the results, scanning the returned row to content and similarity and filtering out results with similarity less than 0.5. Note that similarity thresholds are highly dependent on the embedding model used.
 Finally on line 56 you return the results.
 
 **Listing 8: sql/search.sql**
@@ -417,7 +417,7 @@ In `main.go` we tie everything up.
 ```
 
 Listing 9 shows main.go.
-On lines 13-23 you set the command line flags and parse them.
+On lines 18-23 you set the command line flags and parse them.
 On lines 25-31 you set the log level to `DEBUG` if the `DEBUG` environment variable is set.
 Since both ingest and search need a database connection, you create one on lines 33-38.
 On line 40 you set the context to `context.TODO` signaling you're not sure yet about the timeout to use.
