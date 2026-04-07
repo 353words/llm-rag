@@ -1,5 +1,5 @@
 ## RAG in Go: A Vulnerability Research Tool
-++
++++
 title = "RAG in Go: A Vulnerability Research Tool"
 date = "FIXME"
 tags = ["golang"]
@@ -78,15 +78,14 @@ On lines 12-17 `init` sets the URL for the [kronk][kronk] API.
 `NewLLM` on lines 20-26 return a new OpenAI compatible connection to kronk. Since OpenAI API requires an API key we provide a mock one on line 23.
 `NewEmbedder` on lines 29-40 return an LLM that can embed documents. We're using the small `Qwen3-Embedding-0.6B-Q8_0` mode for that.
 
-
 ### Ingestion
 
 In this step we read the data from the zip file, parse the JSON document and then create a vector embedding to insert into the database. Apart from the embedding vector, we store the CVE in text format as well as the ID. 
 
 _Note: Knowing your own data and what people are going to query, you need to design the database schema. 
-For example, if you have multi-tenant database, you can add a `user` column to make sure you query only document that the current user is allowed to read._
+For example, if you have a multi-tenant database, you can add a `user` column to make sure you query only documents that the current user is allowed to read._
 
-For this blog post I'll use [DuckDB](https://duckdb.org/) for its built-in vector support and a simple schema:
+For this blog post I'll use [DuckDB][duckdb] for its built-in vector support and a simple schema:
 
 
 **Listing 2: Database Schema**
@@ -97,7 +96,6 @@ For this blog post I'll use [DuckDB](https://duckdb.org/) for its built-in vecto
 003     content TEXT NOT NULL,
 004     embedding FLOAT[1024]
 005 );
-
 ```
 
 Listing 2 shows the database schema. You use the `embedding` column to find out documents relevant to the user query.
@@ -156,8 +154,6 @@ The `Content` method on lines 43-57 returns a string representation of the vulne
 For embedding, use `full=false` so that only `Summary`, `Details` and `Package` are included to avoid noise. 
 For storage, use `full=true` that will get to the LLM context.
 
-
-
 **Listing 4: decodeEntry
 
 ```go
@@ -178,7 +174,6 @@ For storage, use `full=true` that will get to the LLM context.
 073     return v, nil
 074 
 075 }
-
 ```
 
 Listing 4 shows `decodeEntry` that decodes an entry in the zip file.
@@ -428,14 +423,14 @@ On lines 13-23 you set the command line flags and parse them.
 On lines 25-31 you set the log level to `DEBUG` if the `DEBUG` environment variable is set.
 Since both ingest and search need a database connection, you create one on lines 33-38.
 On line 40 you set the context to `context.TODO` signaling you're not sure yet about the timeout to use.
-On line 42 you check if you `options.ingest` flag is set and if so you run ingestion on lines 43-47.
+On line 42 you check if the `options.ingest` flag is set and if so you run ingestion on lines 43-47.
 On lines 50-55 you get the user query from the command line and on lines 56-59 you call the search.
 
 You can run a search example using `make search`:
 
 ```
 $ make search
-go run . 'what are three most common causes of errors in HTTP?'
+go run . 'what are the three most common causes of errors in HTTP?'
 
 
 Three most common causes of HTTP errors in the provided context:
@@ -446,7 +441,7 @@ Three most common causes of HTTP errors in the provided context:
 
 ### Conclusion and Further Steps
 
-In about 350 lines of Go code, we created a system that ingests data and search in it using embeddings and LLM.
+In about 350 lines of Go code, we created a system that ingests data and searches in it using embeddings and LLM.
 Using RAG allows LLM to work with data that was not available to them when they were trained. 
 The most common use case is data that's internal to the company.
 
@@ -454,7 +449,7 @@ In real scenarios you'll run ingestion on a schedule or when someone adds a new 
 
 One main area for improvement in the ingestion process is chunking.
 Say you embed a whole book, if you add it as context to your query you'll fill up the context and will get bad results (if any).
-You need to split long documents to meaningful chunks, where "meaningful" differs for the type of document.
+You need to split long documents into meaningful chunks, where "meaningful" differs for the type of document.
 For example, you'll split source code by functions, markdown files by headings and [more][chunking].
 
 Another place where you can improve the code is enhancing the user query.
@@ -469,9 +464,11 @@ What interesting uses did you find for RAG based systems? Drop me a line at miki
 [chunking]: https://www.datacamp.com/blog/chunking-strategies
 [code]: https://github.com/353words/llm-rag
 [cosine]: https://en.wikipedia.org/wiki/Cosine_similarity
+[duckdb]: https://duckdb.org/
 [embedding]: https://en.wikipedia.org/wiki/Embedding_(machine_learning)
 [kron]: https://www.kronkai.com/
 [rag]: https://en.wikipedia.org/wiki/Retrieval-augmented_generation
 [tools]: https://www.ardanlabs.com/blog/2026/03/using-tools-a-meeting-scheduler/
 [vulndb]: https://vuln.go.dev/
+
 

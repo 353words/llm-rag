@@ -14,4 +14,4 @@ ingest: nuke-db
 	go run . -ingest
 
 search:
-	go run . 'what are three most common causes of errors in HTTP?'
+	go run . 'what are the three most common causes of errors in HTTP?'
