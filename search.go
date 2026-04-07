@@ -6,34 +6,26 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 
-	"github.com/ollama/ollama/api"
+	"github.com/tmc/langchaingo/llms"
 )
-
-func init() {
-	if os.Getenv("DEBUG") == "" {
-		return
-	}
-
-	h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	})
-	log := slog.New(h)
-	slog.SetDefault(log)
-}
 
 //go:embed sql/search.sql
 var searchSQL string
 
-func queryDB(ctx context.Context, c *api.Client, db *sql.DB, query string, count int) ([]string, error) {
-	em, err := Embed(ctx, c, query)
+func queryDB(ctx context.Context, db *sql.DB, query string, count int) ([]string, error) {
+	em, err := NewEmbedder()
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := db.QueryContext(ctx, searchSQL, em, count)
+	vec, err := em.EmbedQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.QueryContext(ctx, searchSQL, vec, count)
 	if err != nil {
 		return nil, err
 	}
@@ -64,51 +56,14 @@ func queryDB(ctx context.Context, c *api.Client, db *sql.DB, query string, count
 	return results, nil
 }
 
-func chat(ctx context.Context, client *api.Client, req *api.ChatRequest) (string, error) {
-	var buf strings.Builder
-
-	err := client.Chat(ctx, req, func(resp api.ChatResponse) error {
-		buf.WriteString(resp.Message.Content)
-		return nil
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	return buf.String(), nil
-}
-
-const model = "ministral-3"
-
-//go:embed prompts/improve.txt
-var improvePrompt string
-
-func imporve(ctx context.Context, c *api.Client, query string) (string, error) {
-	req := api.ChatRequest{
-		Model: model,
-		Messages: []api.Message{
-			{Role: "system", Content: improvePrompt},
-			{Role: "user", Content: query},
-		},
-	}
-
-	return chat(ctx, c, &req)
-}
-
-//go:embed prompts/search.txt
-var searchPrompt string
-
-func search(ctx context.Context, c *api.Client, db *sql.DB, query string) error {
-	dbQuery, err := imporve(ctx, c, query)
+func search(ctx context.Context, db *sql.DB, query string) error {
+	docs, err := queryDB(ctx, db, query, 20)
 	if err != nil {
 		return err
 	}
-	slog.Debug("improve", "query", dbQuery)
 
-	docs, err := queryDB(ctx, c, db, dbQuery, 5)
-	if err != nil {
-		return err
+	if len(docs) == 0 {
+		return fmt.Errorf("search: %q - no relevant documents found", query)
 	}
 
 	var buf strings.Builder
@@ -118,20 +73,35 @@ func search(ctx context.Context, c *api.Client, db *sql.DB, query string) error 
 		fmt.Fprintln(&buf)
 	}
 
-	req := api.ChatRequest{
-		Model: model,
-		Messages: []api.Message{
-			{Role: "system", Content: searchPrompt},
-			{Role: "system", Content: "CVEs:\n" + buf.String()},
-			{Role: "user", Content: "QUERY:" + query},
-		},
-	}
-
-	response, err := chat(ctx, c, &req)
+	llm, err := NewLLM("Qwen3-0.6B-Q8_0")
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(response)
+	systemPrompt := `
+You are an expert cybersecurity researcher answering questions with retrieved vulnerability records.
+
+Use only the information in the provided context. Treat the context as the source of truth.
+Do not invent CVE IDs, products, versions, impact, fixes, timelines, or mitigations.
+If the context is incomplete or does not support a conclusion, say that plainly.
+
+Focus on directly answering the user's question.
+Prefer a concise response.
+When helpful, summarize the matching CVEs, affected components, impact, and mitigations grounded in the context.
+Do not ask follow-up questions.
+`
+	systemPrompt += "\n## Context\n" + buf.String()
+
+	messages := []llms.MessageContent{
+		llms.TextParts(llms.ChatMessageTypeSystem, systemPrompt),
+		llms.TextParts(llms.ChatMessageTypeHuman, query),
+	}
+
+	resp, err := llm.GenerateContent(ctx, messages)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(resp.Choices[0].Content)
 	return nil
 }

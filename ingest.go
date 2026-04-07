@@ -7,11 +7,11 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
-	"github.com/ollama/ollama/api"
 )
 
 type Vuln struct {
@@ -33,29 +33,38 @@ func (v Vuln) Package() string {
 		if err := json.Unmarshal(a, &p); err != nil {
 			continue
 		}
+
 		return p.Package.Name
 	}
 
 	return ""
 }
 
-func (v Vuln) String() string {
+func (v Vuln) Content(full bool) string {
 	var buf strings.Builder
 
-	fmt.Fprintln(&buf, "ID:", v.ID)
-	fmt.Fprintln(&buf, "Aliases:", strings.Join(v.Aliases, ","))
-	fmt.Fprintln(&buf, "Published:", v.Published)
-	fmt.Fprintln(&buf, "Package:", v.Package())
+	if full {
+		fmt.Fprintln(&buf, "ID:", v.ID)
+		fmt.Fprintln(&buf, "Aliases:", strings.Join(v.Aliases, ","))
+		fmt.Fprintln(&buf, "Published:", v.Published)
+	}
+
 	fmt.Fprintln(&buf, "Summary:", v.Summary)
-	fmt.Fprintln(&buf, "Destails:", v.Details)
+	fmt.Fprintln(&buf, "Details:", v.Details)
+	fmt.Fprintln(&buf, "Package:", v.Package())
 
 	return buf.String()
 }
 
-//go:embed sql/insert.sql
-var insertSQL string
+var (
+	//go:embed sql/schema.sql
+	schemaSQL string
 
-func ingest(ctx context.Context, c *api.Client, db *sql.DB) error {
+	//go:embed sql/insert.sql
+	insertSQL string
+)
+
+func ingest(ctx context.Context, db *sql.DB) error {
 	// https://vuln.go.dev/vulndb.zip
 	r, err := zip.OpenReader("vulndb.zip")
 	if err != nil {
@@ -63,11 +72,25 @@ func ingest(ctx context.Context, c *api.Client, db *sql.DB) error {
 	}
 	defer r.Close()
 
-	count := 0
-	total := len(r.File)
+	if _, err := db.ExecContext(ctx, schemaSQL); err != nil {
+		return err
+	}
+
+	em, err := NewEmbedder()
+	if err != nil {
+		return err
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	count, total, nErr := 0, len(r.File), 0
 
 	for i, f := range r.File {
-		fmt.Printf("%d/%d\r", i, total)
+		fmt.Printf("%d/%d\r", i+1, total)
 		if !strings.HasPrefix(f.Name, "ID/") {
 			continue
 		}
@@ -75,6 +98,7 @@ func ingest(ctx context.Context, c *api.Client, db *sql.DB) error {
 		count++
 		rc, err := f.Open()
 		if err != nil {
+			rc.Close()
 			return err
 		}
 
@@ -82,19 +106,25 @@ func ingest(ctx context.Context, c *api.Client, db *sql.DB) error {
 		var v Vuln
 
 		if err := dec.Decode(&v); err != nil {
+			rc.Close()
 			return err
 		}
 
-		content := v.String()
-		em, err := Embed(ctx, c, content)
+		rc.Close()
+		slog.Debug("ingest document", "id", v.ID)
+
+		vec, err := em.EmbedQuery(ctx, v.Content(false))
 		if err != nil {
-			return err
+			slog.Warn("embed", "id", v.ID, "error", err)
+			nErr++
+			continue
 		}
 
-		if _, err := db.ExecContext(ctx, insertSQL, v.ID, content, em); err != nil {
+		if _, err := tx.ExecContext(ctx, insertSQL, v.ID, v.Content(true), vec); err != nil {
 			return err
 		}
 	}
 
-	return nil
+	slog.Info("ingest", "total", total, "errors", nErr)
+	return tx.Commit()
 }
