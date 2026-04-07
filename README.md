@@ -286,9 +286,84 @@ On lines 6-8 you use `?` as placeholder for the values. On line 8 you make sure 
 
 You can run `make ingest` to run this step.
 
-### 
+### Searching
+
+In the search part, you'll get a query from the user. First, you'll query the database for documents that are similar to the user query and then you'll ask the LLM the user query with these documents in the context.
+
+**Listing 7: queryDB**
+
+```go
+014 //go:embed sql/search.sql
+015 var searchSQL string
+016 
+017 func queryDB(ctx context.Context, db *sql.DB, query string, count int) ([]string, error) {
+018     em, err := NewEmbedder()
+019     if err != nil {
+020         return nil, err
+021     }
+022 
+023     vec, err := em.EmbedQuery(ctx, query)
+024     if err != nil {
+025         return nil, err
+026     }
+027 
+028     rows, err := db.QueryContext(ctx, searchSQL, vec, count)
+029     if err != nil {
+030         return nil, err
+031     }
+032     defer rows.Close()
+033 
+034     var (
+035         content    string
+036         similarity float32
+037         results    []string
+038     )
+039 
+040     for rows.Next() {
+041         if err := rows.Scan(&content, &similarity); err != nil {
+042             return nil, err
+043         }
+044 
+045         if similarity < 0.5 {
+046             continue
+047         }
+048 
+049         results = append(results, content)
+050     }
+051 
+052     if err := rows.Err(); err != nil {
+053         return nil, err
+054     }
+055 
+056     return results, nil
+057 }
+```
+
+Listing 7 shows `queryDB` which is the first part.
+On line 15 you use `embed` to get the search SQL query.
+On lines 18-21 you create a new embedder and on lines 23-27 you use it to embed the user query.
+On lines 28 you query the database using the query embedding vector.
+On lines 40-50 you iterate over the results, scanning the returned row to content and similarity and filtering out results with similarity less than 0.5 (similarity range is 0-1).
+Finally on line 56 you return the results.
+
+**Listing 8: sql/search.sql**
+
+```sql
+001 SELECT
+002     content,
+003     array_cosine_similarity(embedding, ?::FLOAT[1024]) AS similarity 
+004 FROM vulns
+005 ORDER BY similarity DESC
+006 LIMIT ?
+007 ;
+```
+
+Listing 8 shows the search SQL.
+On line 3 you use [cosine similarity][cosine] to measure the similarity between the user query and database document.
+On line 5 your order by the similarity and one line 6 you limit the number of returned documents.
 
 
+[cosine]: https://en.wikipedia.org/wiki/Cosine_similarity
 [embedding]: https://en.wikipedia.org/wiki/Embedding_(machine_learning)
 [kron]: https://www.kronkai.com/
 [rag]: https://en.wikipedia.org/wiki/Retrieval-augmented_generation
