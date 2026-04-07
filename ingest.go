@@ -56,6 +56,23 @@ func (v Vuln) Content(full bool) string {
 	return buf.String()
 }
 
+func decodeEntry(zf *zip.File) (Vuln, error) {
+	r, err := zf.Open()
+	if err != nil {
+		return Vuln{}, err
+	}
+	defer r.Close()
+
+	dec := json.NewDecoder(r)
+
+	var v Vuln
+	if err := dec.Decode(&v); err != nil {
+		return Vuln{}, err
+	}
+
+	return v, nil
+}
+
 var (
 	//go:embed sql/schema.sql
 	schemaSQL string
@@ -96,21 +113,12 @@ func ingest(ctx context.Context, db *sql.DB) error {
 		}
 
 		count++
-		rc, err := f.Open()
+		v, err := decodeEntry(f)
 		if err != nil {
-			rc.Close()
+			slog.Error("decode", "error", err)
 			return err
 		}
 
-		dec := json.NewDecoder(rc)
-		var v Vuln
-
-		if err := dec.Decode(&v); err != nil {
-			rc.Close()
-			return err
-		}
-
-		rc.Close()
 		slog.Debug("ingest document", "id", v.ID)
 
 		vec, err := em.EmbedQuery(ctx, v.Content(false))
